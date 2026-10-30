@@ -65,7 +65,7 @@ async function generarConGemini(mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
     return `Hola ${nombre}! Soy la secre de Lilab 😊 Mandame foto o STL y te cotizo en 10 min. PLA $5.5/gr, PETG $10/gr.`;
   }
-  const modelos = ['gemini-2.5-flash','gemini-2.5-flash-lite','gemini-1.5-flash-8b'];
+  const modelos = ['gemini-2.0-flash', 'gemini-3.5-flash-lite', 'gemini-1.5-flash'];
   for (const modelo of modelos) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${GEMINI_API_KEY}`;
