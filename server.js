@@ -51,8 +51,8 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
     return `¡Hola ${nombre}! En COCDEP manejamos créditos individuales (hasta $300k) y grupales (desde 3 personas). ¿En qué te podemos ayudar hoy? 😊`;
   }
   
-  // MODELOS ACTUALIZADOS SEGÚN LA DOCUMENTACIÓN VIGENTE
-  const modelos = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+  // USAMOS ÚNICAMENTE GEMINI-3.6-FLASH QUE ES EL QUE RESPONDE RÁPIDO Y ESTABLE
+  const modelos = ['gemini-3.6-flash'];
   
   let contents = [];
   historialChat.forEach(m => {
@@ -74,7 +74,7 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
         };
         
         console.log(`Intentando modelo ${modelo} (intento ${intento})...`);
-        const resp = await axios.post(url, body, { headers: {'Content-Type':'application/json'}, timeout: 25000 });
+        const resp = await axios.post(url, body, { headers: {'Content-Type':'application/json'}, timeout: 20000 });
         const cand = resp.data?.candidates?.[0];
         if (!cand) continue;
         let texto = (cand.content?.parts || []).map(p=>p.text||'').join('').trim();
