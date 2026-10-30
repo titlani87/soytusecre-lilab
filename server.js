@@ -12,42 +12,46 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '1426928223838877';
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const PORT = process.env.PORT || 10000;
-const ADMIN_KEY = process.env.ADMIN_KEY || 'lilab123';
+const ADMIN_KEY = process.env.ADMIN_KEY || 'financiera123';
 const NOTIFY_NUMBER = process.env.NOTIFY_NUMBER || '5219993243402';
 
-const DB_PATH = path.join('/tmp', 'lilab_db.json');
+const DB_PATH = path.join('/tmp', 'financiera_db.json');
 function loadDB() {
   try {
     if (fs.existsSync(DB_PATH)) return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
   } catch(e) {}
-  return { chats: {}, pedidos: [], citas: [] };
+  return { chats: {}, citas: [] };
 }
 function saveDB(db) {
   try { fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2)); } catch(e) { console.error('Error saveDB', e.message); }
 }
 let DB = loadDB();
 
-const SYSTEM_PROMPT = `Eres Lupita, la asistente virtual de Lilab Estudio, un estudio de impresión 3D en CDMX y Mérida. Tu tono es cálido, humano, cercano y natural (mexicanismo ligero como "va que va", "claro que sí"). 
+const SYSTEM_PROMPT = `Eres Lupita, la asesora virtual de atención y crédito de la microfinanciera. Tu tono es amable, profesional, cálido y de confianza (mexicano cercano, usa expresiones como "claro que sí", "con gusto", "va que va").
 
-DATOS OFICIALES:
-- PLA: $5.50/gr (interior). PETG: $10.00/gr (exterior, sol/agua).
-- Entrega: 24-72h. Entregas en Macropaza 12:00 pm. Sin anticipo.
-- Tamaños máx: 22 x 22 x 25 cm.
+OBJETIVO PRINCIPAL:
+Ayudar a los clientes a solicitar información sobre créditos y agendar una visita presencial de un asesor de la financiera directamente en su negocio o domicilio.
 
-REGLA DE ORO ESTRICTA:
-- Si el cliente ya mandó una foto, un archivo, o ya dijo qué material quiere (PLA/PETG), QUEDA PROHIBIDO pedirle de nuevo la foto o el material. 
-- Saluda con naturalidad, reconoce lo que te mandó y dile que el equipo lo revisa para cotizar. Sé breve (máximo 3 oraciones). Máximo 2 emojis.
+DATOS QUE DEBES RECABAR EN LA CONVERSACIÓN (Paso a paso, sin abrumar):
+1. Nombre completo del interesado.
+2. Dirección exacta o colonia donde se ubica su negocio/domicilio para la visita.
+3. Qué día y horario exacto le queda cómodo recibir al asesor.
+
+REGLA DE ORO CONTRA BUCLES:
+- Revisa el historial. Si el usuario ya te dio su dirección o el horario, NUNCA se los vuelvas a pedir. 
+- Cuando tengas completos los datos de la cita (Nombre, Dirección, Día y Hora), confírmale de enterado, felicítalo y dile que su cita quedó agendada y que un asesor se presentará puntualmente. 
+- Sé breve (máximo 3 oraciones). Máximo 2 emojis.
 `;
 
 function detectarIntencion(texto) {
   const low = texto.toLowerCase();
-  const esPedido = /quiero|cotiz|cuanto|precio|pedido|comprar|encargar|llavero|imprimir|pieza|foto/.test(low);
-  return { esPedido };
+  const esCita = /credito|crédito|prestamo|préstamo|asesor|visita|cita|dinero|financiamiento|necesito|interesa|domicilio|horario|dia|días/.test(low);
+  return { esCita };
 }
 
 async function generarConGemini(historialChat, mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
-    return `¡Claro que sí, ${nombre}! Ya tengo tu imagen y material registrados, el taller lo revisa y te cotizamos en un momento. 😊`;
+    return `¡Hola ${nombre}! Con gusto te atendemos en la financiera. ¿Nos compartes tu dirección y qué día te puede visitar un asesor? 😊`;
   }
   
   const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash'];
@@ -76,12 +80,11 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
       let texto = (cand.content?.parts || []).map(p=>p.text||'').join('').trim();
       if (texto && texto.length > 5) return texto;
     } catch (e) {
-      continue; // Si falla un modelo, pasa al siguiente de forma silenciosa
+      continue;
     }
   }
   
-  // FALLBACK INTELIGENTE ABSOLUTO (Evita respuestas genéricas de bienvenida)
-  return `¡Va que va, ${nombre}! Recibí tu mensaje y la imagen. El equipo del taller lo checa y te mandamos la cotización exacta por aquí. 🚀`;
+  return `¡Claro que sí, ${nombre}! Para agendar la visita de nuestro asesor, ¿me podrías confirmar tu dirección exacta y qué día y horario te queda mejor? 🤝`;
 }
 
 async function enviarWhatsApp(to, texto) {
@@ -120,15 +123,12 @@ app.post('/webhook', async (req, res) => {
     let textoUsuario = '';
     let tipo = message.type;
 
-    // CAPTURA LIMPIA SIN TEXTOS RAROS QUE CONFUNDAN A LA IA
     if (message.type === 'text') {
       textoUsuario = message.text.body;
     } else if (message.type === 'image') {
-      textoUsuario = message.image?.caption ? `Envié una foto con este texto: "${message.image.caption}"` : `Envié una imagen para cotizar impresión.`;
-    } else if (message.type === 'document') {
-      textoUsuario = `Envié un archivo: ${message.document?.filename || 'documento'}`;
+      textoUsuario = `[El cliente envió una imagen/comprobante]`;
     } else {
-      textoUsuario = `[Mensaje multimedia tipo ${message.type}]`;
+      textoUsuario = `[Mensaje tipo ${message.type}]`;
     }
 
     if (!DB.chats[from]) {
@@ -139,10 +139,11 @@ app.post('/webhook', async (req, res) => {
     DB.chats[from].ultimo = new Date().toISOString();
     DB.chats[from].nombre = nombre;
 
+    // Detectar intención de cita o solicitud de crédito
     const intent = detectarIntencion(textoUsuario);
-    if (intent.esPedido && !DB.pedidos.find(p => p.telefono === from && Date.now() - new Date(p.fecha).getTime() < 3600000)) {
-      DB.pedidos.push({ id: Date.now(), nombre, telefono: from, descripcion: textoUsuario, fecha: new Date().toISOString(), estado: 'Nuevo' });
-      await notificarOwner(`🛒 NUEVO PEDIDO\nDe: ${nombre} (${from})\nDice: ${textoUsuario}\n\nDashboard: https://soytusecre-lilab.onrender.com/admin?key=${ADMIN_KEY}`);
+    if (intent.esCita && !DB.citas.find(p => p.telefono === from && Date.now() - new Date(p.fecha).getTime() < 3600000)) {
+      DB.citas.push({ id: Date.now(), nombre, telefono: from, detalle: textoUsuario, fecha: new Date().toISOString(), estado: 'Cita Solicitada' });
+      await notificarOwner(`📅 NUEVA SOLICITUD DE CITA / CRÉDITO\nDe: ${nombre} (${from})\nMensaje: ${textoUsuario}\n\nRevisa el Dashboard: https://soytusecre-lilab.onrender.com/admin?key=${ADMIN_KEY}`);
     }
     saveDB(DB);
 
@@ -156,13 +157,14 @@ app.post('/webhook', async (req, res) => {
   } catch (e) { console.error('Error webhook:', e.message); }
 });
 
+// DASHBOARD PARA LA FINANCIERA
 app.get('/admin', (req, res) => {
   const key = req.query.key;
-  if (key !== ADMIN_KEY) return res.status(401).send('<h1>401 - No autorizado</h1>');
+  if (key !== ADMIN_KEY) return res.status(401).send('<h1>401 - No autorizado. Usa ?key=financiera123</h1>');
   
   DB = loadDB();
   const totalChats = Object.keys(DB.chats).length;
-  const totalPedidos = DB.pedidos.length;
+  const totalCitas = DB.citas.length;
   const totalMensajes = Object.values(DB.chats).reduce((acc, c) => acc + c.mensajes.length, 0);
 
   let chatsHtml = Object.values(DB.chats).sort((a,b) => new Date(b.ultimo) - new Date(a.ultimo)).map(chat => {
@@ -175,73 +177,73 @@ app.get('/admin', (req, res) => {
     <div style="border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin:12px 0;background:white">
       <strong>👤 ${chat.nombre}</strong> - ${chat.telefono} <small style="color:#888">${new Date(chat.ultimo).toLocaleString('es-MX')}</small>
       <div style="display:flex;flex-direction:column;margin-top:10px">${msgs}</div>
-      <a href="https://wa.me/${chat.telefono}" target="_blank" style="display:inline-block;margin-top:10px;background:#25D366;color:white;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px">Responder en WhatsApp</a>
+      <a href="https://wa.me/${chat.telefono}" target="_blank" style="display:inline-block;margin-top:10px;background:#25D366;color:white;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px">Contactar por WhatsApp</a>
     </div>
     `;
   }).join('') || '<p style="color:#888">Aún no hay chats.</p>';
 
-  let pedidosHtml = DB.pedidos.slice().reverse().map(p => `
+  let citasHtml = DB.citas.slice().reverse().map(c => `
     <tr>
-      <td style="padding:8px;border-bottom:1px solid #eee">${new Date(p.fecha).toLocaleString('es-MX')}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee"><strong>${p.nombre}</strong><br><small>${p.telefono}</small></td>
-      <td style="padding:8px;border-bottom:1px solid #eee">${p.descripcion}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee"><span style="background:#ffeb3b;padding:2px 8px;border-radius:12px;font-size:12px">${p.estado}</span></td>
+      <td style="padding:8px;border-bottom:1px solid #eee">${new Date(c.fecha).toLocaleString('es-MX')}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee"><strong>${c.nombre}</strong><br><small>${c.telefono}</small></td>
+      <td style="padding:8px;border-bottom:1px solid #eee">${c.detalle}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee"><span style="background:#e0f7fa;color:#00796b;padding:2px 8px;border-radius:12px;font-size:12px">${c.estado}</span></td>
     </tr>
-  `).join('') || '<tr><td colspan=4 style="padding:20px;color:#888;text-align:center">No hay pedidos</td></tr>';
+  `).join('') || '<tr><td colspan=4 style="padding:20px;color:#888;text-align:center">No hay citas registradas aún</td></tr>';
 
   res.send(`
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Lilab Estudio - Panel SoyTuSecre</title>
+<title>Panel Microfinanciera - SoyTuSecre</title>
 <style>
   *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#f5f5f7;margin:0;padding:0;color:#222}
-  header{background:#111;color:white;padding:20px 24px;display:flex;justify-content:space-between;align-items:center}
+  header{background:#004d40;color:white;padding:20px 24px;display:flex;justify-content:space-between;align-items:center}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;padding:20px 24px}
   .stat{background:white;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
-  .stat b{font-size:28px;display:block}
+  .stat b{font-size:28px;display:block;color:#004d40}
   .container{padding:0 24px 40px;max-width:1100px;margin:0 auto}
   table{width:100%;background:white;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);border-collapse:collapse}
   th{text-align:left;padding:12px;background:#fafafa;font-size:13px;color:#666}
   .tab{cursor:pointer;padding:10px 18px;border-radius:8px;border:1px solid #ddd;background:white;margin-right:8px}
-  .tab.active{background:#111;color:white;border-color:#111}
+  .tab.active{background:#004d40;color:white;border-color:#004d40}
   h2{margin:24px 0 12px}
 </style>
 </head>
 <body>
 <header>
-  <div><h1 style="margin:0;font-size:20px">Lilab Estudio 🚀 Panel SoyTuSecre</h1><small style="opacity:0.7">WhatsApp: +52 55 5494 5365</small></div>
-  <div><small>by Closerme</small></div>
+  <div><h1 style="margin:0;font-size:20px">Panel de Citas y Créditos 💼</h1><small style="opacity:0.8">Asistente Virtual Activa</small></div>
+  <div><small>by SoyTuSecre & Closerme</small></div>
 </header>
 
 <div class="stats">
-  <div class="stat"><b>${totalChats}</b><small>Chats</small></div>
-  <div class="stat"><b>${totalPedidos}</b><small>Pedidos</small></div>
-  <div class="stat"><b>${totalMensajes}</b><small>Mensajes</small></div>
-  <div class="stat"><b>✅ Online</b><small>Estado</small></div>
+  <div class="stat"><b>${totalChats}</b><small>Prospectos Totales</small></div>
+  <div class="stat"><b>${totalCitas}</b><small>Citas / Visitas Agendadas</small></div>
+  <div class="stat"><b>${totalMensajes}</b><small>Mensajes Procesados</small></div>
+  <div class="stat"><b>✅ Online</b><small>Estado del Bot</small></div>
 </div>
 
 <div class="container">
   <div style="margin:10px 0">
-    <button class="tab active" onclick="show('pedidos')">🛒 Pedidos</button>
-    <button class="tab" onclick="show('chats')">💬 Chats</button>
+    <button class="tab active" onclick="show('citas')">📅 Citas y Visitas de Asesores</button>
+    <button class="tab" onclick="show('chats')">💬 Conversaciones en Vivo</button>
   </div>
-  <div id="pedidos">
-    <h2>Pedidos y cotizaciones</h2>
-    <table><thead><tr><th>Fecha</th><th>Cliente</th><th>Detalle</th><th>Estado</th></tr></thead><tbody>${pedidosHtml}</tbody></table>
+  <div id="citas">
+    <h2>Prospectos que solicitaron visita o crédito</h2>
+    <table><thead><tr><th>Fecha Registro</th><th>Cliente / Teléfono</th><th>Detalles del Mensaje / Dirección / Horario</th><th>Estado</th></tr></thead><tbody>${citasHtml}</tbody></table>
   </div>
   <div id="chats" style="display:none">
-    <h2>Conversaciones</h2>
+    <h2>Historial de Chats Recientes</h2>
     ${chatsHtml}
   </div>
 </div>
 
 <script>
-function show(id){ document.getElementById('pedidos').style.display=id==='pedidos'?'block':'none'; document.getElementById('chats').style.display=id==='chats'?'block':'none'; document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); }
+function show(id){ document.getElementById('citas').style.display=id==='citas'?'block':'none'; document.getElementById('chats').style.display=id==='chats'?'block':'none'; document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); }
 setTimeout(()=>location.reload(),30000);
 </script>
 </body></html>
   `);
 });
 
-app.get('/', (req, res) => res.send('Lilab V3.9 Activo 🚀 - <a href="/admin?key=lilab123">Ver Panel</a>'));
-app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
+app.get('/', (req, res) => res.send('SoyTuSecre - Módulo Microfinanciera Activo 🚀 - <a href="/admin?key=financiera123">Ver Panel de Citas</a>'));
+app.listen(PORT, () => console.log(`Servidor Financiera en puerto ${PORT}`));
