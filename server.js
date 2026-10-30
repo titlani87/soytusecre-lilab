@@ -21,7 +21,7 @@ DATOS REALES:
 - Instagram: https://www.instagram.com/lilabestudio/
 - Cotizacion: necesitas archivo STL o 3MF
 
-TONO: Humana, corta, casual, mexicana, 1-2 emojis max. No suenes robot. Responde en max 2 lineas.
+TONO: Humana, corta, casual, mexicana, 1-2 emojis max. No suenes robot. Responde en 2-3 oraciones completas, nunca dejes frase a medias. Si cotizas, da precio.
 Si preguntan algo fuera de impresion 3D, di que solo ves temas de Lilab pero con amabilidad.
 
 Ejemplos:
@@ -50,7 +50,7 @@ async function generarConGemini(mensajeUsuario, nombre) {
       
       const body = {
         contents: [{ role: "user", parts: [{ text: `${SYSTEM_PROMPT}\n\nCliente ${nombre} dice: ${mensajeUsuario}\nResponde corto y humano:` }] }],
-        generationConfig: { temperature: 0.85, maxOutputTokens: 250, topP: 0.9 }
+        generationConfig: { temperature: 0.85, maxOutputTokens: 500, topP: 0.9, topK: 40 }
       };
 
       console.log(`Probando Gemini modelo: ${modelo}`);
@@ -59,9 +59,13 @@ async function generarConGemini(mensajeUsuario, nombre) {
         timeout: 12000
       });
 
-      const texto = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const cand = resp.data?.candidates?.[0];
+      const parts = cand?.content?.parts || [];
+      const texto = parts.map(p => p.text || '').join('');
+      const finishReason = cand?.finishReason;
+      console.log(`FinishReason: ${finishReason}`);
       if (texto) {
-        console.log(`Gemini ${modelo} OK: ${texto.substring(0,100)}`);
+        console.log(`Gemini ${modelo} OK (${texto.length} chars): ${texto.substring(0,150)}`);
         return texto.trim();
       }
     } catch (e) {
