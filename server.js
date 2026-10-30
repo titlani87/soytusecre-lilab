@@ -46,13 +46,13 @@ function detectarIntencion(texto) {
   return { esCita };
 }
 
-// FUNCIÓN CON REINTENTO AUTOMÁTICO Y MANEJO DE ERRORES VISIBLES
 async function generarConGemini(historialChat, mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
     return `¡Hola ${nombre}! En COCDEP manejamos créditos individuales (hasta $300k) y grupales (desde 3 personas). ¿En qué te podemos ayudar hoy? 😊`;
   }
   
-  const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+  // MODELOS ACTUALIZADOS SEGÚN EL REPORTE DE LA API DE GOOGLE
+  const modelos = ['gemini-3.8-flash', 'gemini-1.5-flash-8b'];
   
   let contents = [];
   historialChat.forEach(m => {
@@ -63,33 +63,29 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
   });
   contents.push({ role: "user", parts: [{ text: `Cliente ${nombre} dice: "${mensajeUsuario}"` }] });
 
-  // Intentamos con reintentos y modelos estables
   for (const modelo of modelos) {
-    for (let intento = 1; intento <= 2; intento++) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${GEMINI_API_KEY}`;
-        const body = {
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents: contents,
-          generationConfig: { temperature: 0.7, maxOutputTokens: 500, topP: 0.9 }
-        };
-        
-        console.log(`Intentando ${modelo} (intento ${intento})...`);
-        const resp = await axios.post(url, body, { headers: {'Content-Type':'application/json'}, timeout: 25000 });
-        const cand = resp.data?.candidates?.[0];
-        if (!cand) continue;
-        let texto = (cand.content?.parts || []).map(p=>p.text||'').join('').trim();
-        if (texto && texto.length > 3) {
-          console.log(`¡Éxito con ${modelo}!`);
-          return texto;
-        }
-      } catch (e) {
-        console.error(`Error en ${modelo} intento ${intento}:`, e.response?.data?.error?.message || e.message);
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${GEMINI_API_KEY}`;
+      const body = {
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: contents,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 500, topP: 0.9 }
+      };
+      
+      console.log(`Intentando modelo: ${modelo}...`);
+      const resp = await axios.post(url, body, { headers: {'Content-Type':'application/json'}, timeout: 25000 });
+      const cand = resp.data?.candidates?.[0];
+      if (!cand) continue;
+      let texto = (cand.content?.parts || []).map(p=>p.text||'').join('').trim();
+      if (texto && texto.length > 3) {
+        console.log(`¡Éxito con ${modelo}!`);
+        return texto;
       }
+    } catch (e) {
+      console.error(`Error en ${modelo}:`, e.response?.data?.error?.message || e.message);
     }
   }
   
-  // FALLBACK INTELIGENTE BASADO EN LO QUE PREGUNTÓ EL USUARIO (NO TEXTO FIJO)
   const low = mensajeUsuario.toLowerCase();
   if (low.includes('grupal') || low.includes('grupo')) {
     return `¡Claro que sí, ${nombre}! Los créditos grupales son desde 3 personas, son sin aval y con pagos fijos. ¿Te gustaría que un asesor te visite para darte más detalles? 🤝`;
@@ -169,7 +165,6 @@ app.post('/webhook', async (req, res) => {
   } catch (e) { console.error('Error webhook:', e.message); }
 });
 
-// DASHBOARD PARA COCDEP
 app.get('/admin', (req, res) => {
   const key = req.query.key;
   if (key !== ADMIN_KEY) return res.status(401).send('<h1>401 - No autorizado. Usa ?key=cocdep123 en la URL</h1>');
