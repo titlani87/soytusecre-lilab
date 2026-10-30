@@ -18,45 +18,38 @@ const NOTIFY_NUMBER = process.env.NOTIFY_NUMBER || '5219993243402';
 const DB_PATH = path.join('/tmp', 'cocdep_db.json');
 function loadDB() {
   try {
-    if (existsSync(DB_PATH)) return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+    if (fs.existsSync(DB_PATH)) return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
   } catch(e) {}
   return { chats: {}, citas: [] };
 }
-function existsSync(filePath) {
-  try { return fs.existsSync(filePath); } catch(e) { return false; }
-}
-
 function saveDB(db) {
   try { fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2)); } catch(e) { console.error('Error saveDB', e.message); }
 }
 let DB = loadDB();
 
-const SYSTEM_PROMPT = `Eres Lupita, la asesora virtual oficial de COCDEP. Tu tono es amable, profesional, cálido y de confianza (mexicano cercano, usa expresiones como "claro que sí", "con gusto").
+const SYSTEM_PROMPT = `Eres Lupita, la asesora virtual oficial de COCDEP. Tu tono es amable, profesional y cálido (mexicano cercano).
 
-BASE DE CONOCIMIENTOS OFICIAL DE COCDEP:
-1. CRÉDITOS INDIVIDUALES:
-   - Montos: Desde $1,000 hasta $300,000 pesos (Crédito Impulsa desde $5,000). Plazos de 1 hasta 18 meses. Pagos semanales, bisemanales o quincenales (fijos).
-   - Requisitos: INE y comprobante de domicilio (no mayor a 3 meses), garantía y 4 referencias.
-2. CRÉDITOS GRUPALES:
-   - Integrantes: De al menos 3 personas. ¡Sin aval!, pagos fijos a tu medida. Garantía líquida después de recibir el crédito.
-   - Requisitos: INE y comprobante de domicilio (no mayor a 3 meses) de cada integrante.
+INFORMACIÓN DE COCDEP QUE DEBES USAR:
+- Créditos Individuales: Montos desde $1,000 hasta $300,000 pesos (Crédito Impulsa desde $5,000). Plazos de 1 a 18 meses. Pagos semanales, bisemanales o quincenales. Requisitos: INE, comprobante de domicilio (no mayor a 3 meses), garantía y 4 referencias.
+- Créditos Grupales: Desde 3 personas. ¡Sin aval!, pagos fijos a tu medida. Garantía líquida posterior al crédito. Requisitos: INE y comprobante de domicilio de cada integrante.
 
-INSTRUCCIONES CRÍTICAS (ANTI-BUCLES):
-- LEE LA PREGUNTA DEL CLIENTE: Si pregunta por grupales, responde sobre grupos de al menos 3 personas y sin aval. Si pregunta por requisitos, da los requisitos. 
-- PROHIBIDO repetir respuestas enlatadas. Adapta tu respuesta a lo que acaba de preguntar exactamente.
-- Solo cuando ya hayas respondido su duda, pídele amablemente su dirección y el día/horario para la visita del asesor.
+INSTRUCCIONES CRÍTICAS:
+- SI EL CLIENTE PREGUNTA por montos, tipos de crédito o requisitos, RESPóNDELE ESA DUDA DIRECTAMENTE PRIMERO.
+- NUNCA repitas una frase enlatada si el cliente acaba de hacer otra pregunta.
+- Solo después de resolver su duda, invítalo amablemente a agendar la visita de un asesor pidiendo su dirección, día y horario.
 - Sé breve (máximo 3 oraciones). Máximo 2 emojis.
 `;
 
 function detectarIntencion(texto) {
   const low = texto.toLowerCase();
-  const esCita = /credito|crédito|prestamo|préstamo|individual|grupal|asesor|visita|cita|dinero|financiamiento|necesito|interesa|domicilio|horario|dia|días|calle|colonia|requisitos|monto/.test(low);
+  const esCita = /credito|crédito|prestamo|préstamo|individual|grupal|asesor|visita|cita|dinero|financiamiento|necesito|interesa|domicilio|horario|dia|días|calle|requisitos|monto|cuanto|cuánto/.test(low);
   return { esCita };
 }
 
+// FUNCIÓN CON REINTENTO AUTOMÁTICO Y MANEJO DE ERRORES VISIBLES
 async function generarConGemini(historialChat, mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
-    return `¡Hola ${nombre}! En COCDEP tenemos créditos individuales (hasta $300k) y grupales (desde 3 personas sin aval). ¿Qué duda tienes sobre ellos? 😊`;
+    return `¡Hola ${nombre}! En COCDEP manejamos créditos individuales (hasta $300k) y grupales (desde 3 personas). ¿En qué te podemos ayudar hoy? 😊`;
   }
   
   const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash'];
@@ -70,33 +63,42 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
   });
   contents.push({ role: "user", parts: [{ text: `Cliente ${nombre} dice: "${mensajeUsuario}"` }] });
 
+  // Intentamos con reintentos y modelos estables
   for (const modelo of modelos) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${GEMINI_API_KEY}`;
-      const body = {
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 500, topP: 0.9 }
-      };
-      
-      const resp = await axios.post(url, body, { headers: {'Content-Type':'application/json'}, timeout: 20000 });
-      const cand = resp.data?.candidates?.[0];
-      if (!cand) continue;
-      let texto = (cand.content?.parts || []).map(p=>p.text||'').join('').trim();
-      if (texto && texto.length > 5) return texto;
-    } catch (e) {
-      continue;
+    for (let intento = 1; intento <= 2; intento++) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${GEMINI_API_KEY}`;
+        const body = {
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: contents,
+          generationConfig: { temperature: 0.7, maxOutputTokens: 500, topP: 0.9 }
+        };
+        
+        console.log(`Intentando ${modelo} (intento ${intento})...`);
+        const resp = await axios.post(url, body, { headers: {'Content-Type':'application/json'}, timeout: 25000 });
+        const cand = resp.data?.candidates?.[0];
+        if (!cand) continue;
+        let texto = (cand.content?.parts || []).map(p=>p.text||'').join('').trim();
+        if (texto && texto.length > 3) {
+          console.log(`¡Éxito con ${modelo}!`);
+          return texto;
+        }
+      } catch (e) {
+        console.error(`Error en ${modelo} intento ${intento}:`, e.response?.data?.error?.message || e.message);
+      }
     }
   }
   
-  // RESPUESTA DE RESPALDO DINÁMICA SEGÚN LO QUE PREGUNTÓ EL USUARIO
+  // FALLBACK INTELIGENTE BASADO EN LO QUE PREGUNTÓ EL USUARIO (NO TEXTO FIJO)
   const low = mensajeUsuario.toLowerCase();
   if (low.includes('grupal') || low.includes('grupo')) {
-    return `¡Claro que sí, ${nombre}! Los créditos grupales son de al menos 3 personas, son sin aval y tienen pagos fijos a tu medida. ¿Te gustaría que un asesor te visite para darte más detalles? 🤝`;
+    return `¡Claro que sí, ${nombre}! Los créditos grupales son desde 3 personas, son sin aval y con pagos fijos. ¿Te gustaría que un asesor te visite para darte más detalles? 🤝`;
+  } else if (low.includes('monto') || low.includes('cuanto') || low.includes('cuánto')) {
+    return `¡Claro que sí, ${nombre}! En los créditos individuales manejamos montos desde $1,000 hasta $300,000 pesos con plazos de hasta 18 meses. 📈`;
   } else if (low.includes('requisito')) {
-    return `¡Claro que sí, ${nombre}! Los requisitos básicos son tu INE y un comprobante de domicilio con antigüedad no mayor a 3 meses. ¿Qué día te puede visitar un asesor para iniciar tu trámite? 📋`;
+    return `¡Claro que sí, ${nombre}! Los requisitos básicos son tu INE y un comprobante de domicilio (no mayor a 3 meses). 📋`;
   }
-  return `¡Claro que sí, ${nombre}! En COCDEP te apoyamos con créditos a tu medida. ¿Qué día y horario te queda mejor para que te visite un asesor y platiquemos? 🚀`;
+  return `¡Hola ${nombre}! En COCDEP te apoyamos con créditos individuales y grupales adaptados a tu negocio. ¿Qué día y horario te queda mejor para recibir a un asesor? 🚀`;
 }
 
 async function enviarWhatsApp(to, texto) {
@@ -133,12 +135,11 @@ app.post('/webhook', async (req, res) => {
     const from = message.from;
     const nombre = value?.contacts?.[0]?.profile?.name || 'Cliente';
     let textoUsuario = '';
-    let tipo = message.type;
 
     if (message.type === 'text') {
       textoUsuario = message.text.body;
     } else if (message.type === 'image') {
-      textoUsuario = `[El cliente envió una imagen / documento]`;
+      textoUsuario = `[El cliente envió una imagen]`;
     } else {
       textoUsuario = `[Mensaje tipo ${message.type}]`;
     }
@@ -147,7 +148,7 @@ app.post('/webhook', async (req, res) => {
       DB.chats[from] = { nombre, telefono: from, mensajes: [], ultimo: new Date().toISOString() };
     }
 
-    DB.chats[from].mensajes.push({ de: 'cliente', texto: textoUsuario, hora: new Date().toISOString(), tipo });
+    DB.chats[from].mensajes.push({ de: 'cliente', texto: textoUsuario, hora: new Date().toISOString(), tipo: message.type });
     DB.chats[from].ultimo = new Date().toISOString();
     DB.chats[from].nombre = nombre;
 
