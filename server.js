@@ -18,10 +18,15 @@ const NOTIFY_NUMBER = process.env.NOTIFY_NUMBER || '5219993243402';
 const DB_PATH = path.join('/tmp', 'cocdep_db.json');
 function loadDB() {
   try {
-    if (fs.existsSync(DB_PATH)) return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+    if (existsSync(DB_PATH)) return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
   } catch(e) {}
   return { chats: {}, citas: [] };
 }
+// Función auxiliar por si acaso
+function existsSync(filePath) {
+  try { return fs.existsSync(filePath); } catch(e) { return false; }
+}
+
 function saveDB(db) {
   try { fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2)); } catch(e) { console.error('Error saveDB', e.message); }
 }
@@ -29,30 +34,34 @@ let DB = loadDB();
 
 const SYSTEM_PROMPT = `Eres Lupita, la asesora virtual oficial de COCDEP. Tu tono es amable, profesional, cálido y de confianza (mexicano cercano, usa expresiones como "claro que sí", "con gusto", "va que va").
 
-INFORMACIÓN OFICIAL DE LOS PRODUCTOS Y SERVICIOS DE COCDEP:
-1. PRÉSTAMOS / CRÉDITOS INDIVIDUALES ("Credimpulsados / Emprendedores y Negocios"):
+BASE DE CONOCIMIENTOS OFICIAL DE COCDEP (Usa esto para responder dudas):
+1. CRÉDITOS INDIVIDUALES ("Credimpulsados / Emprendedores y Negocios"):
    - Montos: Desde $1,000 hasta $300,000 pesos (Crédito Impulsa desde $5,000).
-   - Plazos: De 1 hasta 18 meses. Pagos semanales, bisemanales o quincenales (fijos).
-   - Requisitos: INE y comprobante de domicilio (no mayor a 3 meses), garantía y 4 referencias.
+   - Plazos: De 1 hasta 18 meses.
+   - Pagos: Semanales, bisemanales o quincenales (fijos).
+   - Requisitos (Acreditado y Aval): Credencial de elector (INE) y comprobante de domicilio (no mayor a 3 meses), garantía y 4 referencias.
 2. CRÉDITOS GRUPALES:
-   - Integrantes: De al menos 3 personas. ¡Sin aval!, pagos fijos y garantía líquida después de recibir el crédito.
-   - Requisitos: INE y comprobante de domicilio de cada integrante.
+   - Integrantes: De al menos 3 personas. ¡Sin aval!, pagos fijos y a tu medida.
+   - Garantía líquida: Se entrega después de recibir tu crédito.
+   - Requisitos: INE y comprobante de domicilio (no mayor a 3 meses) de cada integrante.
 
-INSTRUCCIONES CLAVE PARA EVITAR BUCLES:
-- SI EL CLIENTE PREGUNTA por los tipos de crédito, responde primero a su duda de forma clara antes de pedir datos. No repitas frases robóticas.
-- REVISA EL HISTORIAL: Si el cliente ya te dio datos (como su dirección o calle), Queda Prohibido volver a pedírsela. Pregunta únicamente lo que falte (por ejemplo, el día y horario preferido para la visita).
-- Sé breve (máximo 3 oraciones). Máximo 2 emojis.
+INSTRUCCIONES CRÍTICAS DE FLUJO (EVITA BUCLES):
+1. **VERIFICA LA DUDA:** Si el cliente pregunta algo específico (ej. montos, plazos, requisitos), búscalo en la base de conocimientos de arriba y **respóndele claramente primero**.
+2. **SI NO TIENES LA RESPUESTA:** Si el cliente pregunta algo muy específico que no está en la base de datos, dile textualmente: "Esa duda en específico se la consulto a un asesor para que te dé los detalles exactos".
+3. **PIDE LA CITA DESPUÉS:** Únicamente cuando ya hayas respondido su duda (o indicado que un asesor se la resolverá), pídele con naturalidad su dirección y el horario/día que le queda cómodo para que un asesor lo visite.
+4. **MEMORIA DE DATOS:** Si el cliente ya dio su dirección o un dato, NUNCA se lo vuelvas a pedir. 
+5. Sé breve (máximo 3 oraciones). Máximo 2 emojis.
 `;
 
 function detectarIntencion(texto) {
   const low = texto.toLowerCase();
-  const esCita = /credito|crédito|prestamo|préstamo|individual|grupal|asesor|visita|cita|dinero|financiamiento|necesito|interesa|domicilio|horario|dia|días|calle|colonia|numero|número/.test(low);
+  const esCita = /credito|crédito|prestamo|préstamo|individual|grupal|asesor|visita|cita|dinero|financiamiento|necesito|interesa|domicilio|horario|dia|días|calle|colonia|numero|número|monto|cuanto|cuánto/.test(low);
   return { esCita };
 }
 
 async function generarConGemini(historialChat, mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
-    return `¡Hola ${nombre}! En COCDEP manejamos créditos individuales (hasta $300k) y grupales (desde 3 personas). ¿Qué día te puede visitar un asesor? 😊`;
+    return `¡Hola ${nombre}! En COCDEP manejamos créditos individuales (desde $1,000 hasta $300,000 con plazos de 1 a 18 meses) y grupales (desde 3 personas sin aval). ¿En qué más te puedo ayudar o qué día te puede visitar un asesor? 😊`;
   }
   
   const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash'];
@@ -85,7 +94,7 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
     }
   }
   
-  return `¡Claro que sí, ${nombre}! Manejamos créditos individuales y grupales adaptados a tu negocio. ¿Qué día y horario te queda mejor para que te visite un asesor? 🤝`;
+  return `¡Claro que sí, ${nombre}! En los créditos individuales manejamos montos desde $1,000 hasta $300,000 con plazos de hasta 18 meses. Para darte una atención más personalizada, ¿qué día y horario te queda mejor para que te visite un asesor? 🤝`;
 }
 
 async function enviarWhatsApp(to, texto) {
