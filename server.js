@@ -35,9 +35,9 @@ INFORMACIÓN DE COCDEP QUE DEBES USAR:
 
 INSTRUCCIONES CRÍTICAS:
 - SI EL CLIENTE PREGUNTA por montos, tipos de crédito o requisitos, RESPÓNDELE ESA DUDA DIRECTAMENTE PRIMERO.
-- NUNCA repitas una frase enlatada si el cliente acaba de hacer otra pregunta.
+- NUNCA dejes frases a la mitad. Termina siempre tus oraciones con claridad y un punto final.
 - Solo después de resolver su duda, invítalo amablemente a agendar la visita de un asesor pidiendo su dirección, día y horario.
-- Sé breve (máximo 3 oraciones). Máximo 2 emojis.
+- Sé breve (máximo 3 oraciones cortas). Máximo 2 emojis.
 `;
 
 function detectarIntencion(texto) {
@@ -46,12 +46,32 @@ function detectarIntencion(texto) {
   return { esCita };
 }
 
+// Extractor inteligente de dirección y horario para el dashboard
+function extraerDatosVisita(historialMensajes) {
+  let direccion = 'Pendiente de definir';
+  let horario = 'Pendiente de definir';
+  
+  historialMensajes.forEach(m => {
+    if (m.de === 'cliente') {
+      const t = m.texto.toLowerCase();
+      // Si menciona calle, colonia, número, av, etc., lo tomamos como dirección
+      if (t.includes('calle') || t.includes('colonia') || t.includes('#') || t.includes('av') || t.includes('merida') || t.includes('cholul')) {
+        direccion = m.texto;
+      }
+      // Si menciona horario, días, pm, am, mañana, tarde, etc.
+      if (t.includes('pm') || t.includes('am') || t.includes(':') || t.includes('mañana') || t.includes('tarde') || t.includes('lunes') || t.includes('martes') || t.includes('miércoles') || t.includes('jueves') || t.includes('viernes') || t.includes('sábado')) {
+        horario = m.texto;
+      }
+    }
+  });
+  return { direccion, horario };
+}
+
 async function generarConGemini(historialChat, mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
     return `¡Hola ${nombre}! En COCDEP manejamos créditos individuales (hasta $300k) y grupales (desde 3 personas). ¿En qué te podemos ayudar hoy? 😊`;
   }
   
-  // USAMOS ÚNICAMENTE GEMINI-3.6-FLASH QUE ES EL QUE RESPONDE RÁPIDO Y ESTABLE
   const modelos = ['gemini-3.6-flash'];
   
   let contents = [];
@@ -70,33 +90,21 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
         const body = {
           systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: contents,
-          generationConfig: { temperature: 0.7, maxOutputTokens: 500, topP: 0.9 }
+          generationConfig: { temperature: 0.7, maxOutputTokens: 800, topP: 0.9 }
         };
         
-        console.log(`Intentando modelo ${modelo} (intento ${intento})...`);
         const resp = await axios.post(url, body, { headers: {'Content-Type':'application/json'}, timeout: 20000 });
         const cand = resp.data?.candidates?.[0];
         if (!cand) continue;
         let texto = (cand.content?.parts || []).map(p=>p.text||'').join('').trim();
-        if (texto && texto.length > 3) {
-          console.log(`¡Éxito con ${modelo}!`);
-          return texto;
-        }
+        if (texto && texto.length > 3) return texto;
       } catch (e) {
-        console.error(`Error en ${modelo} intento ${intento}:`, e.response?.data?.error?.message || e.message);
+        console.error(`Error en ${modelo}:`, e.message);
       }
     }
   }
   
-  const low = mensajeUsuario.toLowerCase();
-  if (low.includes('grupal') || low.includes('grupo')) {
-    return `¡Claro que sí, ${nombre}! Los créditos grupales son desde 3 personas, son sin aval y con pagos fijos. ¿Te gustaría que un asesor te visite para darte más detalles? 🤝`;
-  } else if (low.includes('monto') || low.includes('cuanto') || low.includes('cuánto')) {
-    return `¡Claro que sí, ${nombre}! En los créditos individuales manejamos montos desde $1,000 hasta $300,000 pesos con plazos de hasta 18 meses. 📈`;
-  } else if (low.includes('requisito')) {
-    return `¡Claro que sí, ${nombre}! Los requisitos básicos son tu INE y un comprobante de domicilio (no mayor a 3 meses). 📋`;
-  }
-  return `¡Hola ${nombre}! En COCDEP te apoyamos con créditos individuales y grupales adaptados a tu negocio. ¿Qué día y horario te queda mejor para recibir a un asesor? 🚀`;
+  return `¡Hola ${nombre}! En COCDEP te apoyamos con créditos individuales y grupales. ¿Qué día y horario te queda mejor para recibir a un asesor? 🚀`;
 }
 
 async function enviarWhatsApp(to, texto) {
@@ -150,23 +158,41 @@ app.post('/webhook', async (req, res) => {
     DB.chats[from].ultimo = new Date().toISOString();
     DB.chats[from].nombre = nombre;
 
-    const intent = detectarIntencion(textoUsuario);
-    if (intent.esCita && !DB.citas.find(p => p.telefono === from && Date.now() - new Date(p.fecha).getTime() < 3600000)) {
-      DB.citas.push({ id: Date.now(), nombre, telefono: from, detalle: textoUsuario, fecha: new Date().toISOString(), estado: 'Cita Solicitada' });
-      await notificarOwner(`📅 NUEVA SOLICITUD COCDEP\nDe: ${nombre} (${from})\nMensaje: ${textoUsuario}\n\nRevisa el Dashboard: https://soytusecre-lilab.onrender.com/admin?key=${ADMIN_KEY}`);
-    }
-    saveDB(DB);
-
+    // Generar respuesta con Gemini primero
     const historialReciente = DB.chats[from].mensajes.slice(-8);
     const respuesta = await generarConGemini(historialReciente, textoUsuario, nombre);
 
     DB.chats[from].mensajes.push({ de: 'bot', texto: respuesta, hora: new Date().toISOString() });
-    saveDB(DB);
+    
+    // Extraer datos actualizados del chat para la tabla de citas
+    const extraido = extraerDatosVisita(DB.chats[from].mensajes);
 
+    // Buscar si ya existe la cita para este teléfono, si no, crearla; si sí, actualizarla con la dirección/horario nuevo
+    let citaExistente = DB.citas.find(p => p.telefono === from);
+    if (!citaExistente) {
+      DB.citas.push({ 
+        id: Date.now(), 
+        nombre, 
+        telefono: from, 
+        ultimoMensaje: textoUsuario, 
+        direccion: extraido.direccion, 
+        horario: extraido.horario, 
+        fecha: new Date().toISOString(), 
+        estado: 'Cita Solicitada' 
+      });
+      await notificarOwner(`📅 NUEVA SOLICITUD COCDEP\nDe: ${nombre} (${from})\nMensaje: ${textoUsuario}\n\nRevisa el Dashboard: https://soytusecre-lilab.onrender.com/admin?key=${ADMIN_KEY}`);
+    } else {
+      citaExistente.ultimoMensaje = textoUsuario;
+      citaExistente.direccion = extraido.direccion;
+      citaExistente.horario = extraido.horario;
+    }
+    
+    saveDB(DB);
     await enviarWhatsApp(from, respuesta);
   } catch (e) { console.error('Error webhook:', e.message); }
 });
 
+// DASHBOARD PARA COCDEP CON COLUMNAS DE DIRECCIÓN Y HORARIO
 app.get('/admin', (req, res) => {
   const key = req.query.key;
   if (key !== ADMIN_KEY) return res.status(401).send('<h1>401 - No autorizado. Usa ?key=cocdep123 en la URL</h1>');
@@ -193,12 +219,14 @@ app.get('/admin', (req, res) => {
 
   let citasHtml = DB.citas.slice().reverse().map(c => `
     <tr>
-      <td style="padding:8px;border-bottom:1px solid #eee">${new Date(c.fecha).toLocaleString('es-MX')}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee"><strong>${c.nombre}</strong><br><small>${c.telefono}</small></td>
-      <td style="padding:8px;border-bottom:1px solid #eee">${c.detalle}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee"><span style="background:#e0f7fa;color:#00796b;padding:2px 8px;border-radius:12px;font-size:12px">${c.estado}</span></td>
+      <td style="padding:10px;border-bottom:1px solid #eee">${new Date(c.fecha).toLocaleString('es-MX')}</td>
+      <td style="padding:10px;border-bottom:1px solid #eee"><strong>${c.nombre}</strong><br><small>${c.telefono}</small></td>
+      <td style="padding:10px;border-bottom:1px solid #eee">${c.ultimoMensaje}</td>
+      <td style="padding:10px;border-bottom:1px solid #eee;color:#0d47a1"><strong>📍 ${c.direccion}</strong></td>
+      <td style="padding:10px;border-bottom:1px solid #eee;color:#2e7d32"><strong>⏰ ${c.horario}</strong></td>
+      <td style="padding:10px;border-bottom:1px solid #eee"><span style="background:#e0f7fa;color:#00796b;padding:3px 8px;border-radius:12px;font-size:12px">${c.estado}</span></td>
     </tr>
-  `).join('') || '<tr><td colspan=4 style="padding:20px;color:#888;text-align:center">No hay citas registradas aún</td></tr>';
+  `).join('') || '<tr><td colspan=6 style="padding:20px;color:#888;text-align:center">No hay citas registradas aún</td></tr>';
 
   res.send(`
 <!DOCTYPE html>
@@ -210,7 +238,7 @@ app.get('/admin', (req, res) => {
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;padding:20px 24px}
   .stat{background:white;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
   .stat b{font-size:28px;display:block;color:#0d47a1}
-  .container{padding:0 24px 40px;max-width:1100px;margin:0 auto}
+  .container{padding:0 24px 40px;max-width:1200px;margin:0 auto}
   table{width:100%;background:white;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);border-collapse:collapse}
   th{text-align:left;padding:12px;background:#fafafa;font-size:13px;color:#666}
   .tab{cursor:pointer;padding:10px 18px;border-radius:8px;border:1px solid #ddd;background:white;margin-right:8px}
@@ -226,19 +254,19 @@ app.get('/admin', (req, res) => {
 
 <div class="stats">
   <div class="stat"><b>${totalChats}</b><small>Prospectos Totales</small></div>
-  <div class="stat"><b>${totalCitas}</b><small>Citas / Visitas Agendadas</small></div>
+  <div class="stat"><b>${totalCitas}</b><small>Visitas Agendadas</small></div>
   <div class="stat"><b>${totalMensajes}</b><small>Mensajes Procesados</small></div>
   <div class="stat"><b>✅ Online</b><small>Estado del Bot</small></div>
 </div>
 
 <div class="container">
   <div style="margin:10px 0">
-    <button class="tab active" onclick="show('citas')">📅 Citas y Visitas de Asesores</button>
+    <button class="tab active" onclick="show('citas')">📅 Visitas y Datos de Prospectos</button>
     <button class="tab" onclick="show('chats')">💬 Conversaciones en Vivo</button>
   </div>
   <div id="citas">
-    <h2>Prospectos que solicitaron información o visita</h2>
-    <table><thead><tr><th>Fecha Registro</th><th>Cliente / Teléfono</th><th>Detalles / Dirección / Horario</th><th>Estado</th></tr></thead><tbody>${citasHtml}</tbody></table>
+    <h2>Prospectos, Direcciones y Horarios para Visita</h2>
+    <table><thead><tr><th>Fecha Registro</th><th>Cliente</th><th>Último Interés</th><th>📍 Dirección Detectada</th><th>⏰ Horario Detectado</th><th>Estado</th></tr></thead><tbody>${citasHtml}</tbody></table>
   </div>
   <div id="chats" style="display:none">
     <h2>Historial de Chats Recientes</h2>
