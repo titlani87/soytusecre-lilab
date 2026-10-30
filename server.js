@@ -12,10 +12,10 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '1426928223838877';
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const PORT = process.env.PORT || 10000;
-const ADMIN_KEY = process.env.ADMIN_KEY || 'financiera123';
+const ADMIN_KEY = process.env.ADMIN_KEY || 'cocdep123';
 const NOTIFY_NUMBER = process.env.NOTIFY_NUMBER || '5219993243402';
 
-const DB_PATH = path.join('/tmp', 'financiera_db.json');
+const DB_PATH = path.join('/tmp', 'cocdep_db.json');
 function loadDB() {
   try {
     if (fs.existsSync(DB_PATH)) return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
@@ -27,31 +27,44 @@ function saveDB(db) {
 }
 let DB = loadDB();
 
-const SYSTEM_PROMPT = `Eres Lupita, la asesora virtual de atención y crédito de la microfinanciera. Tu tono es amable, profesional, cálido y de confianza (mexicano cercano, usa expresiones como "claro que sí", "con gusto", "va que va").
+const SYSTEM_PROMPT = `Eres Lupita, la asesora virtual oficial de COCDEP. Tu tono es amable, profesional, cálido y de confianza (mexicano cercano, usa expresiones como "claro que sí", "con gusto", "va que va").
 
-OBJETIVO PRINCIPAL:
-Ayudar a los clientes a solicitar información sobre créditos y agendar una visita presencial de un asesor de la financiera directamente en su negocio o domicilio.
+INFORMACIÓN OFICIAL DE LOS PRODUCTOS Y SERVICIOS DE COCDEP:
+1. PRÉSTAMOS / CRÉDITOS INDIVIDUALES ("Credimpulsados / Emprendedores y Negocios"):
+   - Montos: Desde $1,000 hasta $300,000 pesos (con opciones de Crédito Impulsa desde $5,000).
+   - Plazos: De 1 hasta 18 meses.
+   - Modalidad de pagos: Semanales, bisemanales o quincenales (pagos fijos y a tu medida).
+   - Requisitos (Acreditado y Aval): Credencial de elector (INE) y comprobante de domicilio con antigüedad no mayor a 3 meses. Además pide garantía y 4 referencias.
+2. CRÉDITOS GRUPALES:
+   - Integrantes: De al menos 3 personas.
+   - Beneficios: ¡Sin aval!, pagos fijos a tu medida. 
+   - Garantía líquida: Se entrega después de recibir tu crédito.
+   - Requisitos: Credencial de elector (INE) y comprobante de domicilio (no mayor a 3 meses) de cada integrante.
 
-DATOS QUE DEBES RECABAR EN LA CONVERSACIÓN (Paso a paso, sin abrumar):
-1. Nombre completo del interesado.
-2. Dirección exacta o colonia donde se ubica su negocio/domicilio para la visita.
-3. Qué día y horario exacto le queda cómodo recibir al asesor.
+OBJETIVO PRINCIPAL DE LA CONVERSACIÓN:
+Resolver dudas sobre los créditos, orientar al cliente según lo que necesite (individual o grupo) y **agendar la visita presencial de un asesor** en su domicilio o negocio.
+
+DATOS QUE DEBES RECABAR (Paso a paso, sin abrumar):
+1. Qué tipo de crédito le interesa (Individual o Grupal) y monto aproximado.
+2. Nombre completo.
+3. Dirección exacta / colonia para la visita del asesor.
+4. Qué día y horario exacto le queda cómodo recibirlo.
 
 REGLA DE ORO CONTRA BUCLES:
-- Revisa el historial. Si el usuario ya te dio su dirección o el horario, NUNCA se los vuelvas a pedir. 
+- Revisa el historial de mensajes. Si el usuario ya te dio su dirección, el horario o el tipo de crédito, NUNCA se los vuelvas a pedir. 
 - Cuando tengas completos los datos de la cita (Nombre, Dirección, Día y Hora), confírmale de enterado, felicítalo y dile que su cita quedó agendada y que un asesor se presentará puntualmente. 
 - Sé breve (máximo 3 oraciones). Máximo 2 emojis.
 `;
 
 function detectarIntencion(texto) {
   const low = texto.toLowerCase();
-  const esCita = /credito|crédito|prestamo|préstamo|asesor|visita|cita|dinero|financiamiento|necesito|interesa|domicilio|horario|dia|días/.test(low);
+  const esCita = /credito|crédito|prestamo|préstamo|individual|grupal|asesor|visita|cita|dinero|financiamiento|necesito|interesa|domicilio|horario|dia|días|requisitos|monto/.test(low);
   return { esCita };
 }
 
 async function generarConGemini(historialChat, mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
-    return `¡Hola ${nombre}! Con gusto te atendemos en la financiera. ¿Nos compartes tu dirección y qué día te puede visitar un asesor? 😊`;
+    return `¡Hola ${nombre}! Con gusto te atendemos en COCDEP. Tenemos créditos individuales (hasta $300k) y grupales desde 3 personas. ¿Qué tipo de crédito te interesa y qué día te puede visitar un asesor? 😊`;
   }
   
   const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash'];
@@ -84,14 +97,12 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
     }
   }
   
-  return `¡Claro que sí, ${nombre}! Para agendar la visita de nuestro asesor, ¿me podrías confirmar tu dirección exacta y qué día y horario te queda mejor? 🤝`;
+  return `¡Claro que sí, ${nombre}! En COCDEP te apoyamos con créditos individuales o grupales. Para agendar la visita de nuestro asesor, ¿me podrías confirmar tu dirección y qué día y horario te queda mejor? 🤝`;
 }
 
 async function enviarWhatsApp(to, texto) {
   try {
-    await axios.post(`https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`, {
-      messaging_product: 'whatsapp', to, type: 'text', text: { body: texto }
-    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } });
+    await axios.post(`https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`, { messaging_product: 'whatsapp', to, type: 'text', text: { body: texto } }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } });
   } catch (e) {
     console.error('Error WA:', e.message);
   }
@@ -126,7 +137,7 @@ app.post('/webhook', async (req, res) => {
     if (message.type === 'text') {
       textoUsuario = message.text.body;
     } else if (message.type === 'image') {
-      textoUsuario = `[El cliente envió una imagen/comprobante]`;
+      textoUsuario = `[El cliente envió una imagen / documento]`;
     } else {
       textoUsuario = `[Mensaje tipo ${message.type}]`;
     }
@@ -143,107 +154,4 @@ app.post('/webhook', async (req, res) => {
     const intent = detectarIntencion(textoUsuario);
     if (intent.esCita && !DB.citas.find(p => p.telefono === from && Date.now() - new Date(p.fecha).getTime() < 3600000)) {
       DB.citas.push({ id: Date.now(), nombre, telefono: from, detalle: textoUsuario, fecha: new Date().toISOString(), estado: 'Cita Solicitada' });
-      await notificarOwner(`📅 NUEVA SOLICITUD DE CITA / CRÉDITO\nDe: ${nombre} (${from})\nMensaje: ${textoUsuario}\n\nRevisa el Dashboard: https://soytusecre-lilab.onrender.com/admin?key=${ADMIN_KEY}`);
-    }
-    saveDB(DB);
-
-    const historialReciente = DB.chats[from].mensajes.slice(-8);
-    const respuesta = await generarConGemini(historialReciente, textoUsuario, nombre);
-
-    DB.chats[from].mensajes.push({ de: 'bot', texto: respuesta, hora: new Date().toISOString() });
-    saveDB(DB);
-
-    await enviarWhatsApp(from, respuesta);
-  } catch (e) { console.error('Error webhook:', e.message); }
-});
-
-// DASHBOARD PARA LA FINANCIERA
-app.get('/admin', (req, res) => {
-  const key = req.query.key;
-  if (key !== ADMIN_KEY) return res.status(401).send('<h1>401 - No autorizado. Usa ?key=financiera123</h1>');
-  
-  DB = loadDB();
-  const totalChats = Object.keys(DB.chats).length;
-  const totalCitas = DB.citas.length;
-  const totalMensajes = Object.values(DB.chats).reduce((acc, c) => acc + c.mensajes.length, 0);
-
-  let chatsHtml = Object.values(DB.chats).sort((a,b) => new Date(b.ultimo) - new Date(a.ultimo)).map(chat => {
-    const msgs = chat.mensajes.slice(-10).map(m => `
-      <div style="margin:6px 0;padding:8px 12px;border-radius:12px;max-width:80%;${m.de==='cliente'?'background:#f0f0f0;align-self:flex-start':'background:#dcf8c6;align-self:flex-end;margin-left:auto'}">
-        <small style="color:#666">${m.de} - ${new Date(m.hora).toLocaleString('es-MX')}</small><br>${m.texto}
-      </div>
-    `).join('');
-    return `
-    <div style="border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin:12px 0;background:white">
-      <strong>👤 ${chat.nombre}</strong> - ${chat.telefono} <small style="color:#888">${new Date(chat.ultimo).toLocaleString('es-MX')}</small>
-      <div style="display:flex;flex-direction:column;margin-top:10px">${msgs}</div>
-      <a href="https://wa.me/${chat.telefono}" target="_blank" style="display:inline-block;margin-top:10px;background:#25D366;color:white;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px">Contactar por WhatsApp</a>
-    </div>
-    `;
-  }).join('') || '<p style="color:#888">Aún no hay chats.</p>';
-
-  let citasHtml = DB.citas.slice().reverse().map(c => `
-    <tr>
-      <td style="padding:8px;border-bottom:1px solid #eee">${new Date(c.fecha).toLocaleString('es-MX')}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee"><strong>${c.nombre}</strong><br><small>${c.telefono}</small></td>
-      <td style="padding:8px;border-bottom:1px solid #eee">${c.detalle}</td>
-      <td style="padding:8px;border-bottom:1px solid #eee"><span style="background:#e0f7fa;color:#00796b;padding:2px 8px;border-radius:12px;font-size:12px">${c.estado}</span></td>
-    </tr>
-  `).join('') || '<tr><td colspan=4 style="padding:20px;color:#888;text-align:center">No hay citas registradas aún</td></tr>';
-
-  res.send(`
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Panel Microfinanciera - SoyTuSecre</title>
-<style>
-  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#f5f5f7;margin:0;padding:0;color:#222}
-  header{background:#004d40;color:white;padding:20px 24px;display:flex;justify-content:space-between;align-items:center}
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;padding:20px 24px}
-  .stat{background:white;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
-  .stat b{font-size:28px;display:block;color:#004d40}
-  .container{padding:0 24px 40px;max-width:1100px;margin:0 auto}
-  table{width:100%;background:white;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);border-collapse:collapse}
-  th{text-align:left;padding:12px;background:#fafafa;font-size:13px;color:#666}
-  .tab{cursor:pointer;padding:10px 18px;border-radius:8px;border:1px solid #ddd;background:white;margin-right:8px}
-  .tab.active{background:#004d40;color:white;border-color:#004d40}
-  h2{margin:24px 0 12px}
-</style>
-</head>
-<body>
-<header>
-  <div><h1 style="margin:0;font-size:20px">Panel de Citas y Créditos 💼</h1><small style="opacity:0.8">Asistente Virtual Activa</small></div>
-  <div><small>by SoyTuSecre & Closerme</small></div>
-</header>
-
-<div class="stats">
-  <div class="stat"><b>${totalChats}</b><small>Prospectos Totales</small></div>
-  <div class="stat"><b>${totalCitas}</b><small>Citas / Visitas Agendadas</small></div>
-  <div class="stat"><b>${totalMensajes}</b><small>Mensajes Procesados</small></div>
-  <div class="stat"><b>✅ Online</b><small>Estado del Bot</small></div>
-</div>
-
-<div class="container">
-  <div style="margin:10px 0">
-    <button class="tab active" onclick="show('citas')">📅 Citas y Visitas de Asesores</button>
-    <button class="tab" onclick="show('chats')">💬 Conversaciones en Vivo</button>
-  </div>
-  <div id="citas">
-    <h2>Prospectos que solicitaron visita o crédito</h2>
-    <table><thead><tr><th>Fecha Registro</th><th>Cliente / Teléfono</th><th>Detalles del Mensaje / Dirección / Horario</th><th>Estado</th></tr></thead><tbody>${citasHtml}</tbody></table>
-  </div>
-  <div id="chats" style="display:none">
-    <h2>Historial de Chats Recientes</h2>
-    ${chatsHtml}
-  </div>
-</div>
-
-<script>
-function show(id){ document.getElementById('citas').style.display=id==='citas'?'block':'none'; document.getElementById('chats').style.display=id==='chats'?'block':'none'; document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); }
-setTimeout(()=>location.reload(),30000);
-</script>
-</body></html>
-  `);
-});
-
-app.get('/', (req, res) => res.send('SoyTuSecre - Módulo Microfinanciera Activo 🚀 - <a href="/admin?key=financiera123">Ver Panel de Citas</a>'));
-app.listen(PORT, () => console.log(`Servidor Financiera en puerto ${PORT}`));
+      await notificarOwner(`📅 NUEVA SOLICITUD COCDEP\nDe: ${nombre} (${from})\nMensaje:${textoUsuario}\n\nRevisa el Dashboard:
