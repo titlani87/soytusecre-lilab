@@ -37,9 +37,10 @@ DATOS OFICIALES DEL ESTUDIO:
 - Formatos aceptados para cotizar: STL, 3MF, OBJ, o simplemente una foto / idea de lo que quieren.
 - Tamaños máx: 22 x 22 x 25 cm (si es más grande se divide en partes).
 
-REGLA DE ORO CONTRA BUCLES (MUY IMPORTANTE):
-- Revisa el historial reciente de la conversación. Si el cliente YA te dio información (como el tamaño, material, idea o si ya le respondiste lo que pedía), **NUNCA VUELVAS A PEDIRLE LO MISMO**. 
-- Si ya tienes los datos básicos, avanza al siguiente paso: invítalo a mandar el archivo STL/foto final o confírmale el registro de su cotización.
+REGLA DE ORO CONTRA BUCLES (OBLIGATORIO):
+- ANTES de responder, revisa todo el historial de mensajes de la conversación. 
+- Si el cliente YA te dio información (como el material PLA/PETG, ya mandó foto, o dio detalles de su pieza), QUEDA PROHIBIDO volver a pedírsela. 
+- Si ya tienes los datos básicos o la foto, da el siguiente paso: dale un rango de precio estimado, dile que el taller revisará el archivo para afinar la cotización o invítalo a concretar su pedido. ¡Nunca repitas preguntas que ya contestó!
 - NUNCA dejes frases incompletas. Sé concisa (máximo 3 oraciones). Máximo 2 emojis.
 `;
 
@@ -55,10 +56,8 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
     return `Hola ${nombre}! Soy la secre de Lilab 😊 Mandame foto o STL y te cotizo en 10 min. PLA $5.5/gr, PETG $10/gr.`;
   }
   
-  // Modelos vigentes y estables
   const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash'];
   
-  // Convertimos el historial previo guardado en formato compatible con Gemini
   let contents = [];
   historialChat.forEach(m => {
     contents.push({
@@ -66,7 +65,6 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
       parts: [{ text: m.texto }]
     });
   });
-  // Añadimos el mensaje actual
   contents.push({ role: "user", parts: [{ text: `Cliente ${nombre} dice: "${mensajeUsuario}"` }] });
 
   for (const modelo of modelos) {
@@ -83,16 +81,15 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
       const cand = resp.data?.candidates?.[0];
       if (!cand) continue;
       let texto = (cand.content?.parts || []).map(p=>p.text||'').join('').trim();
-      console.log(`OK ${modelo} | ${texto.length} chars`);
+      console.log(`OK ${modelo} \vert{}${texto.length} chars`);
       if (texto && texto.length > 10) return texto;
     } catch (e) {
       const errMsg = e.response?.data?.error?.message || e.message;
-      console.error(`Fallo ${modelo}: ${errMsg?.substring(0,300)}`);
+      console.error(`Fallo ${modelo}:${errMsg?.substring(0,300)}`);
       continue;
     }
   }
   
-  // Fallback por si la API falla
   const low = mensajeUsuario.toLowerCase();
   if (low.includes('foto')) return `¡Sí! Mándame la foto 😊 Con eso te digo si se puede imprimir y te ayudo con el archivo.`;
   return `¡Hola ${nombre}! Soy la secre de Lilab 😊 Mándame foto o archivo STL y te cotizo de inmediato.`;
@@ -100,9 +97,7 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
 
 async function enviarWhatsApp(to, texto) {
   try {
-    await axios.post(`https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`, {
-      messaging_product: 'whatsapp', to, type: 'text', text: { body: texto }
-    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } });
+    await axios.post(`https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`, { messaging_product: 'whatsapp', to, type: 'text', text: { body: texto } }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } });
     console.log(`Enviado OK a ${to}`);
   } catch (e) {
     console.error('Error WA:', JSON.stringify(e.response?.data || e.message).substring(0,600));
@@ -138,37 +133,30 @@ app.post('/webhook', async (req, res) => {
     let textoUsuario = '';
     let tipo = message.type;
 
-    if (message.type === 'text') textoUsuario = message.text.body;
-    else if (message.type === 'image') textoUsuario = '[Foto recibida] ¿Pueden imprimir esto?';
-    else if (message.type === 'document') textoUsuario = `[Archivo: ${message.document?.filename}]`;
-    else textoUsuario = `[${message.type}]`;
+    // CAPTURA CORRECTA DE TIPO DE MENSAJE (INCLUYENDO FOTOS)
+    if (message.type === 'text') {
+      textoUsuario = message.text.body;
+    } else if (message.type === 'image') {
+      const captionFoto = message.image?.caption ? ` con texto: "${message.image.caption}"` : '';
+      textoUsuario = `[El cliente ha enviado una FOTO de la pieza${captionFoto}. Quiere cotizar su impresión]`;
+    } else if (message.type === 'document') {
+      textoUsuario = `[Archivo adjunto: ${message.document?.filename}]`;
+    } else {
+      textoUsuario = `[${message.type}]`; }  console.log(`\n--- ${nombre} (${from}):${textoUsuario} ---`);
 
-    console.log(`\n--- ${nombre} (${from}): ${textoUsuario} ---`);
-
-    // Inicializar chat en DB si no existe
     if (!DB.chats[from]) {
       DB.chats[from] = { nombre, telefono: from, mensajes: [], ultimo: new Date().toISOString() };
     }
 
-    // Guardar mensaje del cliente en historial
     DB.chats[from].mensajes.push({ de: 'cliente', texto: textoUsuario, hora: new Date().toISOString(), tipo });
     DB.chats[from].ultimo = new Date().toISOString();
     DB.chats[from].nombre = nombre;
 
-    // Detectar si es pedido o cotización
     const intent = detectarIntencion(textoUsuario);
     if (intent.esPedido && !DB.pedidos.find(p => p.telefono === from && Date.now() - new Date(p.fecha).getTime() < 3600000)) {
       DB.pedidos.push({ id: Date.now(), nombre, telefono: from, descripcion: textoUsuario, fecha: new Date().toISOString(), estado: 'Nuevo' });
-      await notificarOwner(`🛒 NUEVO PEDIDO\nDe: ${nombre} (${from})\nDice: ${textoUsuario}\n\nRevisa dashboard: https://soytusecre-lilab.onrender.com/admin?key=${ADMIN_KEY}`);
-    }
-    saveDB(DB);
+      await notificarOwner(`🛒 NUEVO PEDIDO\nDe: ${nombre} (${from})\nDice:${textoUsuario}\n\nRevisa dashboard: https://soytusecre-lilab.onrender.com/admin?key=${ADMIN_KEY}`); } saveDB(DB);  const historialReciente = DB.chats[from].mensajes.slice(-8); const respuesta = await generarConGemini(historialReciente, textoUsuario, nombre); console.log(`Respuesta: ${respuesta}`);
 
-    // Generar respuesta con historial reciente (últimos 6 mensajes para contexto y evitar bucles)
-    const historialReciente = DB.chats[from].mensajes.slice(-6);
-    const respuesta = await generarConGemini(historialReciente, textoUsuario, nombre);
-    console.log(`Respuesta: ${respuesta}`);
-
-    // Guardar respuesta del bot en historial
     DB.chats[from].mensajes.push({ de: 'bot', texto: respuesta, hora: new Date().toISOString() });
     saveDB(DB);
 
@@ -194,7 +182,7 @@ app.get('/admin', (req, res) => {
     `).join('');
     return `
     <div style="border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin:12px 0;background:white">
-      <strong>👤 ${chat.nombre}</strong> - ${chat.telefono} <small style="color:#888">${new Date(chat.ultimo).toLocaleString('es-MX')}</small>
+      <strong>👤 ${chat.nombre}</strong> -${chat.telefono} <small style="color:#888">${new Date(chat.ultimo).toLocaleString('es-MX')}</small>
       <div style="display:flex;flex-direction:column;margin-top:10px">${msgs}</div>
       <a href="https://wa.me/${chat.telefono}" target="_blank" style="display:inline-block;margin-top:10px;background:#25D366;color:white;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px">Responder en WhatsApp</a>
     </div>
@@ -230,41 +218,4 @@ app.get('/admin', (req, res) => {
 </head>
 <body>
 <header>
-  <div><h1 style="margin:0;font-size:20px">Lilab Estudio 🚀 Panel SoyTuSecre</h1><small style="opacity:0.7">WhatsApp: +52 55 5494 5365 • Auto-refresh cada 30s</small></div>
-  <div><small>by Closerme</small></div>
-</header>
-
-<div class="stats">
-  <div class="stat"><b>${totalChats}</b><small>Chats totales</small></div>
-  <div class="stat"><b>${totalPedidos}</b><small>Pedidos / Cotizaciones</small></div>
-  <div class="stat"><b>${totalMensajes}</b><small>Mensajes</small></div>
-  <div class="stat"><b>✅ Online</b><small>Bot activo con Gemini</small></div>
-</div>
-
-<div class="container">
-  <div style="margin:10px 0">
-    <button class="tab active" onclick="show('pedidos')">🛒 Pedidos / Cotizaciones</button>
-    <button class="tab" onclick="show('chats')">💬 Chats en vivo</button>
-  </div>
-
-  <div id="pedidos">
-    <h2>Pedidos y cotizaciones detectadas</h2>
-    <table><thead><tr><th>Fecha</th><th>Cliente</th><th>Qué quiere</th><th>Estado</th></tr></thead><tbody>${pedidosHtml}</tbody></table>
-  </div>
-
-  <div id="chats" style="display:none">
-    <h2>Conversaciones recientes</h2>
-    ${chatsHtml}
-  </div>
-</div>
-
-<script>
-function show(id){ document.getElementById('pedidos').style.display=id==='pedidos'?'block':'none'; document.getElementById('chats').style.display=id==='chats'?'block':'none'; document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); }
-setTimeout(()=>location.reload(),30000);
-</script>
-</body></html>
-  `);
-});
-
-app.get('/', (req, res) => res.send('Lilab V3.8 Activo 🚀 - <a href="/admin?key=lilab123">Ver Panel</a>'));
-app.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
+  <div><h1 style="margin:0;font-size:
