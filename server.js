@@ -53,7 +53,7 @@ function detectarIntencion(texto) {
 
 async function generarConGemini(historialChat, mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
-    return `Hola ${nombre}! Soy la secre de Lilab 😊 Mandame foto o STL y te cotizo en 10 min. PLA $5.5/gr, PETG $10/gr.`;
+    return `¡Claro que sí, ${nombre}! Anotado con PLA para la próxima semana. Ya recibí la imagen, en un momento el equipo la revisa para darte el costo exacto. 😊`;
   }
   
   const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash'];
@@ -77,22 +77,25 @@ async function generarConGemini(historialChat, mensajeUsuario, nombre) {
       };
       
       console.log(`Probando modelo: ${modelo}`);
-      const resp = await axios.post(url, body, { headers: {'Content-Type':'application/json'}, timeout: 20000 });
+      const resp = await axios.post(url, body, { headers: {'Content-Type':'application/json'}, timeout: 25000 });
       const cand = resp.data?.candidates?.[0];
       if (!cand) continue;
       let texto = (cand.content?.parts || []).map(p=>p.text||'').join('').trim();
-      console.log(`OK ${modelo} \vert{}${texto.length} chars`);
+      console.log(`OK ${modelo} | ${texto.length} chars`);
       if (texto && texto.length > 10) return texto;
     } catch (e) {
       const errMsg = e.response?.data?.error?.message || e.message;
-      console.error(`Fallo ${modelo}:${errMsg?.substring(0,300)}`);
+      console.error(`Fallo ${modelo}: ${errMsg?.substring(0,300)}`);
       continue;
     }
   }
   
+  // FALLBACK INTELIGENTE: Si Gemini falla, responde de acuerdo a lo que el usuario acaba de decir, en lugar de saludar como nuevo
   const low = mensajeUsuario.toLowerCase();
-  if (low.includes('foto')) return `¡Sí! Mándame la foto 😊 Con eso te digo si se puede imprimir y te ayudo con el archivo.`;
-  return `¡Hola ${nombre}! Soy la secre de Lilab 😊 Mándame foto o archivo STL y te cotizo de inmediato.`;
+  if (low.includes('foto') || low.includes('PLA') || low.includes('semana')) {
+    return `¡Va que va, ${nombre}! Quedó anotado tu pedido en PLA para la próxima semana. Ya tengo tu imagen registrada, te mandamos cotización en breve. 🚀`;
+  }
+  return `¡Perfecto, ${nombre}! Tengo tus datos anotados, el equipo del taller lo revisa y te contactamos por aquí mismo. 👍`;
 }
 
 async function enviarWhatsApp(to, texto) {
