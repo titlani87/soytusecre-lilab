@@ -165,4 +165,106 @@ app.post('/webhook', async (req, res) => {
 
     // Generar respuesta con historial reciente (últimos 6 mensajes para contexto y evitar bucles)
     const historialReciente = DB.chats[from].mensajes.slice(-6);
-    const respuesta = await generarConGemini(
+    const respuesta = await generarConGemini(historialReciente, textoUsuario, nombre);
+    console.log(`Respuesta: ${respuesta}`);
+
+    // Guardar respuesta del bot en historial
+    DB.chats[from].mensajes.push({ de: 'bot', texto: respuesta, hora: new Date().toISOString() });
+    saveDB(DB);
+
+    await enviarWhatsApp(from, respuesta);
+  } catch (e) { console.error('Error webhook:', e.message); }
+});
+
+// DASHBOARD PARA EL CLIENTE LILAB
+app.get('/admin', (req, res) => {
+  const key = req.query.key;
+  if (key !== ADMIN_KEY) return res.status(401).send('<h1>401 - Acceso No Autorizado</h1><p>Pon ?key=lilab123 en la URL</p>');
+  
+  DB = loadDB();
+  const totalChats = Object.keys(DB.chats).length;
+  const totalPedidos = DB.pedidos.length;
+  const totalMensajes = Object.values(DB.chats).reduce((acc, c) => acc + c.mensajes.length, 0);
+
+  let chatsHtml = Object.values(DB.chats).sort((a,b) => new Date(b.ultimo) - new Date(a.ultimo)).map(chat => {
+    const msgs = chat.mensajes.slice(-10).map(m => `
+      <div style="margin:6px 0;padding:8px 12px;border-radius:12px;max-width:80%;${m.de==='cliente'?'background:#f0f0f0;align-self:flex-start':'background:#dcf8c6;align-self:flex-end;margin-left:auto'}">
+        <small style="color:#666">${m.de} - ${new Date(m.hora).toLocaleString('es-MX')}</small><br>${m.texto}
+      </div>
+    `).join('');
+    return `
+    <div style="border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin:12px 0;background:white">
+      <strong>👤 ${chat.nombre}</strong> - ${chat.telefono} <small style="color:#888">${new Date(chat.ultimo).toLocaleString('es-MX')}</small>
+      <div style="display:flex;flex-direction:column;margin-top:10px">${msgs}</div>
+      <a href="https://wa.me/${chat.telefono}" target="_blank" style="display:inline-block;margin-top:10px;background:#25D366;color:white;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px">Responder en WhatsApp</a>
+    </div>
+    `;
+  }).join('') || '<p style="color:#888">Aún no hay chats registrados.</p>';
+
+  let pedidosHtml = DB.pedidos.slice().reverse().map(p => `
+    <tr>
+      <td style="padding:8px;border-bottom:1px solid #eee">${new Date(p.fecha).toLocaleString('es-MX')}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee"><strong>${p.nombre}</strong><br><small>${p.telefono}</small></td>
+      <td style="padding:8px;border-bottom:1px solid #eee">${p.descripcion}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee"><span style="background:#ffeb3b;padding:2px 8px;border-radius:12px;font-size:12px">${p.estado}</span></td>
+    </tr>
+  `).join('') || '<tr><td colspan=4 style="padding:20px;color:#888;text-align:center">No hay pedidos aún</td></tr>';
+
+  res.send(`
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lilab Estudio - Panel SoyTuSecre</title>
+<style>
+  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#f5f5f7;margin:0;padding:0;color:#222}
+  header{background:#111;color:white;padding:20px 24px;display:flex;justify-content:space-between;align-items:center}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;padding:20px 24px}
+  .stat{background:white;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+  .stat b{font-size:28px;display:block}
+  .container{padding:0 24px 40px;max-width:1100px;margin:0 auto}
+  table{width:100%;background:white;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);border-collapse:collapse}
+  th{text-align:left;padding:12px;background:#fafafa;font-size:13px;color:#666}
+  .tab{cursor:pointer;padding:10px 18px;border-radius:8px;border:1px solid #ddd;background:white;margin-right:8px}
+  .tab.active{background:#111;color:white;border-color:#111}
+  h2{margin:24px 0 12px}
+</style>
+</head>
+<body>
+<header>
+  <div><h1 style="margin:0;font-size:20px">Lilab Estudio 🚀 Panel SoyTuSecre</h1><small style="opacity:0.7">WhatsApp: +52 55 5494 5365 • Auto-refresh cada 30s</small></div>
+  <div><small>by Closerme</small></div>
+</header>
+
+<div class="stats">
+  <div class="stat"><b>${totalChats}</b><small>Chats totales</small></div>
+  <div class="stat"><b>${totalPedidos}</b><small>Pedidos / Cotizaciones</small></div>
+  <div class="stat"><b>${totalMensajes}</b><small>Mensajes</small></div>
+  <div class="stat"><b>✅ Online</b><small>Bot activo con Gemini</small></div>
+</div>
+
+<div class="container">
+  <div style="margin:10px 0">
+    <button class="tab active" onclick="show('pedidos')">🛒 Pedidos / Cotizaciones</button>
+    <button class="tab" onclick="show('chats')">💬 Chats en vivo</button>
+  </div>
+
+  <div id="pedidos">
+    <h2>Pedidos y cotizaciones detectadas</h2>
+    <table><thead><tr><th>Fecha</th><th>Cliente</th><th>Qué quiere</th><th>Estado</th></tr></thead><tbody>${pedidosHtml}</tbody></table>
+  </div>
+
+  <div id="chats" style="display:none">
+    <h2>Conversaciones recientes</h2>
+    ${chatsHtml}
+  </div>
+</div>
+
+<script>
+function show(id){ document.getElementById('pedidos').style.display=id==='pedidos'?'block':'none'; document.getElementById('chats').style.display=id==='chats'?'block':'none'; document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); event.target.classList.add('active'); }
+setTimeout(()=>location.reload(),30000);
+</script>
+</body></html>
+  `);
+});
+
+app.get('/', (req, res) => res.send('Lilab V3.8 Activo 🚀 - <a href="/admin?key=lilab123">Ver Panel</a>'));
+app.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
