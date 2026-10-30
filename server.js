@@ -1,109 +1,107 @@
-
 const express = require('express');
 const axios = require('axios');
-const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'soytusecre_verify_123';
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '1426928223838877';
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const PORT = process.env.PORT || 10000;
 
-// Prompt de Lilab Estudio - SOY TU SECRE
-const SYSTEM_PROMPT = `
-Eres la secre de Lilab Estudio, estudio de impresión 3D en CDMX. Hablas como humana, amigable, cercana, no como robot. Usas emojis moderados.
+const SYSTEM_PROMPT = `Eres la secretaria humana de Lilab Estudio, estudio de impresion 3D en CDMX.
 
-Datos reales:
-- Nombre: Lilab Estudio
+DATOS REALES:
+- Materiales: PLA $5.5/gr (interior, colores bonitos), PETG $10/gr (exterior, aguanta sol y agua)
+- Entrega: 72h maximo, sin anticipo, pago contra entrega
 - Horario: Lun-Vie 9am-6pm
-- NO tienes espacio: 8pm, 20:00, 21:00, 22:00, sábados, domingos. Si piden esos horarios, di: "Ay [nombre], en ese horario no tengo espacio 🥲 ¿te parece si te agendo para mañana a las 9am que es el siguiente espacio más próximo?"
-- Materiales:
-  * PLA: $5.5 el gramo, resistente pero para interior, ideal para prototipos, figuras, decoración, aguanta hasta 60°C
-  * PETG: $10 el gramo, para exteriores, resiste sol, agua y golpes, ideal para piezas funcionales
-- Tiempo entrega: 72 horas después de confirmar archivo
-- Punto entrega: Macropaza a las 12:00 pm
-- Pago: Sin anticipo, pagas cuando te entrego en Macropaza
+- Entregas: Macropaza a las 12pm
 - Instagram: https://www.instagram.com/lilabestudio/
-- Si preguntan precio: pide archivo STL para calcular gramos exactos, no inventes precio sin archivo
-- Si preguntan material: pregunta si es para interior o exterior para recomendar
-- Si quieren agendar: pide nombre completo y archivo STL
-- Si no sabes algo: di "Déjame consultarlo con Lilab y te escribo en 10 min" - no inventes
+- Cotizacion: necesitas archivo STL o 3MF
 
-Estilo: humano, corto, 2-3 frases máximo por mensaje, pregunta de vuelta, usa el nombre de la persona.
+TONO: Humana, corta, casual, mexicana, 1-2 emojis max. No suenes robot. Responde en max 2 lineas.
+Si preguntan algo fuera de impresion 3D, di que solo ves temas de Lilab pero con amabilidad.
 
-Ejemplos de tu tono:
-Usuario: Hola cotización impresión 3D
-Tú: ¡Hola Luis! 👋 Soy la secre de Lilab Estudio. ¿Qué pieza necesitas? Si me mandas el STL te cotizo en 10 min.
-
-Usuario: Cuanto cuesta en petg?
-Tú: Hola por ahí! El PETG está en $10 el gramo, es para exteriores porque aguanta sol y agua. ¿Tu pieza va para exterior? Si me mandas el archivo te digo cuántos gramos pesa.
-
-Usuario: Entregan en sábado?
-Tú: Ay, en sábado no tengo espacio 🥲 ¿te parece si te agendo para mañana a las 9am que es el siguiente espacio más próximo? Estamos Lun-Vie 9am-6pm.
+Ejemplos:
+- "hola" -> "Hola! Soy la secre de Lilab Estudio 😊 ¿Que quieres imprimir?"
+- "cuanto cuesta?" -> "PLA $5.5/gr para interior y PETG $10/gr para exterior que aguanta sol y agua. Mandame tu STL y te cotizo en 10 min"
+- "que es stl?" -> "Es el archivo 3D de tu pieza, como un .obj o .3mf. Si no lo tienes te ayudo a conseguirlo 😊"
 `;
-
 
 async function generarConGemini(mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
-    console.log('No hay GEMINI_API_KEY, usando fallback');
-    return `Hola ${nombre}! Soy la secre de Lilab Estudio 😊 Estamos Lun-Vie 9am-6pm. PLA $5.5/gr, PETG $10/gr, entregamos en Macropaza a las 12pm en 72h sin anticipo. ¿Qué pieza quieres imprimir?`;
+    console.log('No GEMINI_API_KEY, fallback humano');
+    return `Hola ${nombre}! Soy la secre de Lilab Estudio 😊 PLA $5.5/gr, PETG $10/gr, entrega en Macropaza 12pm en 72h. Mandame tu STL y te cotizo.`;
   }
 
+  // Modelos en orden de preferencia - Google dijo usar 3.8-flash
   const modelos = [
-    'models/gemini-3.5-flash-lite',
-    'models/gemini-3.5-flash',
-    'models/gemini-3.8-flash',
-    'models/gemini-3.8-flash',
-    'models/gemini-2.5-flash',
-    'models/gemini-2.0-flash-exp',
-    'models/gemini-1.5-flash-latest',
-    'models/gemini-1.5-flash'
+    'gemini-3.8-flash',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash-latest'
   ];
 
   for (const modelo of modelos) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1/${modelo}:generateContent?key=${GEMINI_API_KEY}`;
+      const url = `https://generativelanguage.googleapis.com/v1/models/${modelo}:generateContent?key=${GEMINI_API_KEY}`;
       
       const body = {
-        contents: [{ role: "user", parts: [{ text: `${SYSTEM_PROMPT}\n\nUsuario ${nombre} dice: ${mensajeUsuario}\n\nResponde como la secre de Lilab Estudio, corto, humano:` }] }],
-        generationConfig: { temperature: 0.8, maxOutputTokens: 300 }
+        contents: [{ role: "user", parts: [{ text: `${SYSTEM_PROMPT}\n\nCliente ${nombre} dice: ${mensajeUsuario}\nResponde corto y humano:` }] }],
+        generationConfig: { temperature: 0.85, maxOutputTokens: 250, topP: 0.9 }
       };
 
-      console.log(`Probando modelo: ${modelo}`);
+      console.log(`Probando Gemini modelo: ${modelo}`);
       const resp = await axios.post(url, body, {
         headers: { 'Content-Type': 'application/json' },
-        timeout: 15000
+        timeout: 12000
       });
 
       const texto = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (texto) {
-        console.log(`Gemini ${modelo} respondió OK: ${texto.substring(0,120)}`);
+        console.log(`Gemini ${modelo} OK: ${texto.substring(0,100)}`);
         return texto.trim();
       }
     } catch (e) {
-      const errMsg = e.response?.data?.error?.message || e.message;
-      console.error(`Error con ${modelo}: ${errMsg.substring(0,300)}`);
-      // Si no es 404, romper, si es 404 probar siguiente modelo
-      if (!errMsg.includes('NOT_FOUND') && !errMsg.includes('is not found') && !errMsg.includes('no longer available')) {
-        break; // Error de API key o cuota, no probar más modelos
+      const err = e.response?.data?.error?.message || e.message;
+      console.error(`Fallo ${modelo}: ${err?.substring(0,250)}`);
+      if (err && (err.includes('API key') || err.includes('quota') || err.includes('PERMISSION_DENIED'))) {
+        break; // Error de key, no probar mas
       }
-      continue; // Probar siguiente modelo
+      continue; // Probar siguiente modelo si es NOT_FOUND
     }
   }
 
-  // Si todos fallan, fallback humano
-  console.log('Todos los modelos Gemini fallaron, usando fallback humano');
-  return `Hola ${nombre}! Soy la secre de Lilab Estudio 😊 ¿Me mandas tu archivo STL para cotizarte? Estamos Lun-Vie 9am-6pm. PLA $5.5/gr y PETG $10/gr, entrega en Macropaza a las 12pm en 72h.`;
+  console.log('Todos los modelos fallaron, usando fallback');
+  // Fallback inteligente sin repetir lo mismo
+  const msg = mensajeUsuario.toLowerCase();
+  if (msg.includes('stl') || msg.includes('que es eso') || msg.includes('archivo')) {
+    return `El STL es el archivo 3D de tu pieza 😊 como el plano para imprimir. Si no lo tienes, me dices que quieres imprimir y te ayudo a conseguirlo. ¿Que pieza es?`;
+  }
+  return `Hola ${nombre}! Soy la secre de Lilab Estudio 😊 Mandame tu archivo 3D y te cotizo en 10 min. PLA $5.5/gr, PETG $10/gr para exterior. Estamos Lun-Vie 9am-6pm.`;
 }
-\n\napp.get('/', (req, res) => {
-  res.send(`SoyTuSecre - Lilab Estudio V3 Gemini ✅ - ${new Date().toISOString()}`);
-});
 
+async function enviarWhatsApp(to, texto) {
+  try {
+    const url = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
+    await axios.post(url, {
+      messaging_product: 'whatsapp',
+      to: to,
+      type: 'text',
+      text: { body: texto }
+    }, {
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' }
+    });
+    console.log(`Enviado OK a ${to}`);
+  } catch (e) {
+    console.error('Error envio WA:', JSON.stringify(e.response?.data || e.message).substring(0,800));
+    throw e;
+  }
+}
+
+// Webhook verification
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -116,46 +114,32 @@ app.get('/webhook', (req, res) => {
   }
 });
 
+// Webhook receiver
 app.post('/webhook', async (req, res) => {
+  res.sendStatus(200); // Responder rapido a Meta
+  
   try {
-    const body = req.body;
-    if (body.object !== 'whatsapp_business_account') return res.sendStatus(200);
-
-    for (const entry of body.entry || []) {
-      for (const change of entry.changes || []) {
-        const value = change.value;
-        const messages = value.messages;
-        if (!messages) continue;
-
-        for (const msg of messages) {
-          const from = msg.from;
-          const textRaw = msg.text?.body || '';
-          const name = value.contacts?.[0]?.profile?.name || 'por ahí';
-          console.log(`Mensaje de ${name} (${from}): ${textRaw}`);
-
-          const reply = await generarConGemini(textRaw, name);
-          console.log(`Respuesta: ${reply.substring(0,200)}`);
-
-          if (WHATSAPP_TOKEN && reply) {
-            try {
-              await axios.post(
-                `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
-                { messaging_product: 'whatsapp', to: from, type: 'text', text: { body: reply } },
-                { headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
-              );
-              console.log(`Enviado OK a ${from}`);
-            } catch (e) {
-              console.error('Error envio WA:', e.response?.data || e.message);
-            }
-          }
-        }
-      }
-    }
-    res.sendStatus(200);
+    const entry = req.body.entry?.[0];
+    const change = entry?.changes?.[0];
+    const message = change?.value?.messages?.[0];
+    
+    if (!message || message.type !== 'text') return;
+    
+    const from = message.from;
+    const text = message.text.body;
+    const nombre = change.value.contacts?.[0]?.profile?.name || 'Luis';
+    
+    console.log(`Mensaje de ${nombre} (${from}): ${text}`);
+    
+    const respuesta = await generarConGemini(text, nombre);
+    console.log(`Respuesta: ${respuesta}`);
+    
+    await enviarWhatsApp(from, respuesta);
   } catch (e) {
     console.error('Error webhook:', e.message);
-    res.sendStatus(200);
   }
 });
 
-app.listen(PORT, () => console.log(`Lilab V3 Gemini en puerto ${PORT}`));
+app.get('/', (req, res) => res.send('Lilab V3.2 Gemini 3.8-flash funcionando 🚀'));
+
+app.listen(PORT, () => console.log(`Lilab V3 Gemini en puerto ${PORT} - ${new Date().toISOString()}`));
