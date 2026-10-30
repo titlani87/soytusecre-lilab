@@ -47,49 +47,60 @@ Usuario: Entregan en sábado?
 Tú: Ay, en sábado no tengo espacio 🥲 ¿te parece si te agendo para mañana a las 9am que es el siguiente espacio más próximo? Estamos Lun-Vie 9am-6pm.
 `;
 
+
 async function generarConGemini(mensajeUsuario, nombre) {
   if (!GEMINI_API_KEY) {
     console.log('No hay GEMINI_API_KEY, usando fallback');
     return `Hola ${nombre}! Soy la secre de Lilab Estudio 😊 Estamos Lun-Vie 9am-6pm. PLA $5.5/gr, PETG $10/gr, entregamos en Macropaza a las 12pm en 72h sin anticipo. ¿Qué pieza quieres imprimir?`;
   }
 
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+  const modelos = [
+    'models/gemini-3.5-flash-lite',
+    'models/gemini-3.5-flash',
+    'models/gemini-3.8-flash',
+    'models/gemini-3.8-flash',
+    'models/gemini-2.5-flash',
+    'models/gemini-2.0-flash-exp',
+    'models/gemini-1.5-flash-latest',
+    'models/gemini-1.5-flash'
+  ];
 
-    const body = {
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: `${SYSTEM_PROMPT}\n\nUsuario ${nombre} dice: ${mensajeUsuario}\n\nResponde como la secre de Lilab Estudio, corto, humano, con el nombre:` }]
-        }
-      ],
-      generationConfig: {
-        temperature: 0.8,
-        maxOutputTokens: 300
+  for (const modelo of modelos) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1/${modelo}:generateContent?key=${GEMINI_API_KEY}`;
+      
+      const body = {
+        contents: [{ role: "user", parts: [{ text: `${SYSTEM_PROMPT}\n\nUsuario ${nombre} dice: ${mensajeUsuario}\n\nResponde como la secre de Lilab Estudio, corto, humano:` }] }],
+        generationConfig: { temperature: 0.8, maxOutputTokens: 300 }
+      };
+
+      console.log(`Probando modelo: ${modelo}`);
+      const resp = await axios.post(url, body, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 15000
+      });
+
+      const texto = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (texto) {
+        console.log(`Gemini ${modelo} respondió OK: ${texto.substring(0,120)}`);
+        return texto.trim();
       }
-    };
-
-    const resp = await axios.post(url, body, {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 10000
-    });
-
-    const texto = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (texto) {
-      console.log(`Gemini respondió: ${texto.substring(0,150)}`);
-      return texto.trim();
-    } else {
-      console.log('Gemini no devolvió texto:', JSON.stringify(resp.data).substring(0,500));
-      return `Hola ${nombre}! Soy la secre de Lilab Estudio, ¿en qué te ayudo?`;
+    } catch (e) {
+      const errMsg = e.response?.data?.error?.message || e.message;
+      console.error(`Error con ${modelo}: ${errMsg.substring(0,300)}`);
+      // Si no es 404, romper, si es 404 probar siguiente modelo
+      if (!errMsg.includes('NOT_FOUND') && !errMsg.includes('is not found') && !errMsg.includes('no longer available')) {
+        break; // Error de API key o cuota, no probar más modelos
+      }
+      continue; // Probar siguiente modelo
     }
-  } catch (e) {
-    console.error('Error Gemini:', JSON.stringify(e.response?.data || e.message).substring(0,800));
-    // Fallback si Gemini falla
-    return `Hola ${nombre}! Soy la secre de Lilab Estudio 😊 ¿Me mandas tu archivo STL para cotizarte? Estamos Lun-Vie 9am-6pm.`;
   }
-}
 
-app.get('/', (req, res) => {
+  // Si todos fallan, fallback humano
+  console.log('Todos los modelos Gemini fallaron, usando fallback humano');
+  return `Hola ${nombre}! Soy la secre de Lilab Estudio 😊 ¿Me mandas tu archivo STL para cotizarte? Estamos Lun-Vie 9am-6pm. PLA $5.5/gr y PETG $10/gr, entrega en Macropaza a las 12pm en 72h.`;
+}
+\n\napp.get('/', (req, res) => {
   res.send(`SoyTuSecre - Lilab Estudio V3 Gemini ✅ - ${new Date().toISOString()}`);
 });
 
