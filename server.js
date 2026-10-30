@@ -54,7 +54,7 @@ async function generarConGemini(mensajeUsuario, nombre) {
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     const body = {
       contents: [
@@ -83,7 +83,7 @@ async function generarConGemini(mensajeUsuario, nombre) {
       return `Hola ${nombre}! Soy la secre de Lilab Estudio, ¿en qué te ayudo?`;
     }
   } catch (e) {
-    console.error('Error Gemini:', e.response?.data || e.message);
+    console.error('Error Gemini:', JSON.stringify(e.response?.data || e.message).substring(0,800));
     // Fallback si Gemini falla
     return `Hola ${nombre}! Soy la secre de Lilab Estudio 😊 ¿Me mandas tu archivo STL para cotizarte? Estamos Lun-Vie 9am-6pm.`;
   }
